@@ -92,10 +92,10 @@ class VmwareCollector():
 
         # label names and ammount will be needed later to insert labels from custom attributes
         self._labelNames = {
-            'vms': ['vm_name', 'host_name', 'dc_name', 'cluster_name'],
-            'vm_perf': ['vm_name', 'host_name', 'dc_name', 'cluster_name'],
-            'vmguests': ['vm_name', 'host_name', 'dc_name', 'cluster_name'],
-            'snapshots': ['vm_name', 'host_name', 'dc_name', 'cluster_name'],
+            'vms': ['vm_name', 'vm_ipaddress', 'host_name', 'dc_name', 'cluster_name'],
+            'vm_perf': ['vm_name', 'vm_ipaddress', 'host_name', 'dc_name', 'cluster_name'],
+            'vmguests': ['vm_name', 'vm_ipaddress', 'host_name', 'dc_name', 'cluster_name'],
+            'snapshots': ['vm_name', 'vm_ipaddress', 'host_name', 'dc_name', 'cluster_name'],
             'datastores': ['ds_name', 'dc_name', 'ds_cluster'],
             'hosts': ['host_name', 'dc_name', 'cluster_name'],
             'host_perf': ['host_name', 'dc_name', 'cluster_name'],
@@ -143,6 +143,10 @@ class VmwareCollector():
                 'vmware_vm_template',
                 'VMWare VM Template (true / false)',
                 labels=self._labelNames['vms']),
+            'vmware_vm_virtual_disk_capacity': GaugeMetricFamily(
+                'vmware_vm_virtual_disk_capacity',
+                'VMWare VM Virtual Disk capacity in bytes',
+                labels=self._labelNames['vms'] + ['disk_label', ]),
         }
         metric_list['vmguests'] = {
             'vmware_vm_guest_disk_free': GaugeMetricFamily(
@@ -733,6 +737,9 @@ class VmwareCollector():
         start = datetime.datetime.utcnow()
         properties = [
             'name',
+            'guest.ipAddress',
+            'config.hardware.device',
+            'guest.net',
             'runtime.host',
             'parent',
         ]
@@ -1088,6 +1095,27 @@ class VmwareCollector():
                 host_moid = row['runtime.host']._moId
 
             labels[moid] = [row['name']]
+
+            ip_addresses = []
+            if 'guest.net' in row:
+                nic_infos = row['guest.net']
+                ip_addresses = []
+                for nic in nic_infos:
+                    for ip in nic.ipAddress:
+                        regex = "^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$"
+                        if(re.search(regex, ip)):
+                            ip_addresses = ip_addresses + [ip]
+
+            if len(ip_addresses) > 0:
+                labels[moid] = labels[moid] + [','.join(ip_addresses)]
+            elif 'guest.ipAddress' in row:
+                labels[moid] = labels[moid] + [row['guest.ipAddress']]
+            else:
+                logging.info(
+                    "IP Address for virtual machine {} not found, filling n/a"
+                    .format(row['name'])
+                )
+                labels[moid] = labels[moid] + ['n/a']
 
             if host_moid in host_labels:
                 labels[moid] = labels[moid] + host_labels[host_moid]
@@ -1571,6 +1599,13 @@ class VmwareCollector():
 
             if 'summary.config.template' in row:
                 metrics['vmware_vm_template'].add_metric(labels, row['summary.config.template'])
+
+            if 'config.hardware.device' in row:
+                for dev in row['config.hardware.device']:
+                    if isinstance(dev, vim.vm.device.VirtualDisk):
+                        metrics['vmware_vm_virtual_disk_capacity'].add_metric(
+                            labels + [dev.deviceInfo.label], dev.capacityInBytes
+                        )
 
             if 'guest.disk' in row and len(row['guest.disk']) > 0:
                 for disk in row['guest.disk']:
