@@ -1101,6 +1101,9 @@ class VmwareCollector():
                 nic_infos = row['guest.net']
                 ip_addresses = []
                 for nic in nic_infos:
+                    if nic.network == None:
+                        # This is to skip IP Addresses that setup by Docker
+                        continue
                     for ip in nic.ipAddress:
                         regex = "^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$"
                         if(re.search(regex, ip)):
